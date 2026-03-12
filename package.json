@@ -1,0 +1,92 @@
+{
+  "name": "asco-state",
+  "displayName": "ASCO State",
+  "description": "State tracker and synth-trigger visualiser for Antescofo-like score files",
+  "version": "0.0.1",
+  "publisher": "cw",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:ascoState.refresh"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "ascoState.refresh",
+        "title": "ASCO State: Refresh"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ascoState",
+          "title": "ASCO State",
+          "icon": "media/wave.svg"
+        }
+      ]
+    },
+    "views": {
+      "ascoState": [
+        {
+          "id": "ascoState.currentState",
+          "name": "Current State"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "ASCO State",
+      "properties": {
+        "ascoState.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable ASCO State decorations and sidebar."
+        },
+        "ascoState.fileExtensions": {
+          "type": "array",
+          "default": [
+            ".asco",
+            ".asco.txt"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "File extensions treated as score files."
+        },
+        "ascoState.trackKeywords": {
+          "type": "array",
+          "default": [
+            "BPM",
+            "synthmode",
+            "synthrange",
+            "split"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Persistent state keywords to track."
+        },
+        "ascoState.highlightTriggeredNotes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Highlight NOTE lines whose pitch falls inside the active synthrange."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.5.4"
+  }
+}
