@@ -126,8 +126,7 @@ function allowedExtensions() {
         .get("fileExtensions", [".asco", ".asco.txt"]);
 }
 function isScoreDocument(doc) {
-    const name = doc.fileName.toLowerCase();
-    return allowedExtensions().some(ext => name.endsWith(ext.toLowerCase()));
+    return doc.languageId === "asco" || doc.languageId === "antescofo";
 }
 function stripComment(line) {
     const semicolon = line.indexOf(";");
@@ -219,9 +218,10 @@ function describeSynthRange(rawValue) {
     // We anchor the scale at C4 and show the synth ceiling note somewhere to the left.
     const middleC = 60;
     const width = 16;
-    const clamped = Math.max(0, Math.min(width, middleC - high));
-    const left = "─".repeat(clamped);
-    const right = "─".repeat(width - clamped);
+    const distanceBelowC4 = Math.max(0, Math.min(width, middleC - high));
+    const positionFromLeft = width - distanceBelowC4;
+    const left = "─".repeat(positionFromLeft);
+    const right = "─".repeat(width - positionFromLeft);
     return `bass → ${note}  ${left}●${right}|C4`;
 }
 function parseNoteLine(line) {

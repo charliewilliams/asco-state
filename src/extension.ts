@@ -163,8 +163,7 @@ function allowedExtensions(): string[] {
 }
 
 function isScoreDocument(doc: vscode.TextDocument): boolean {
-  const name = doc.fileName.toLowerCase();
-  return allowedExtensions().some(ext => name.endsWith(ext.toLowerCase()));
+  return doc.languageId === "asco" || doc.languageId === "antescofo";
 }
 
 function stripComment(line: string): string {

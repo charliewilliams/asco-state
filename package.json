@@ -3,15 +3,24 @@
   "displayName": "ASCO State",
   "description": "State tracker and synth-trigger visualiser for Antescofo-like score files",
   "version": "0.0.1",
+  "license": "MIT",
   "publisher": "cw",
   "engines": {
     "vscode": "^1.90.0"
   },
+  "bugs": {
+    "url": "https://github.com/charliewilliams/asco-state/issues"
+  },
+  "homepage": "https://github.com/charliewilliams/asco-state",
   "categories": [
     "Other"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/charliewilliams/asco-state"
+  },
   "activationEvents": [
-    "onStartupFinished",
+    "onLanguage:antescofo",
     "onCommand:ascoState.refresh"
   ],
   "main": "./out/extension.js",
@@ -20,6 +29,14 @@
       {
         "command": "ascoState.refresh",
         "title": "ASCO State: Refresh"
+      }
+    ],
+    "languages": [
+      {
+        "id": "asco",
+        "aliases": ["ASCO", "Antescofo"],
+        "extensions": [".asco", ".asco.txt"],
+        "configuration": "./language-configuration.json"
       }
     ],
     "viewsContainers": {
@@ -89,4 +106,4 @@
     "@types/vscode": "^1.90.0",
     "typescript": "^5.5.4"
   }
-}
+} 
