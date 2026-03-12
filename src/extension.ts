@@ -30,6 +30,8 @@ let triggerDecoration: vscode.TextEditorDecorationType;
 let stateLineDecoration: vscode.TextEditorDecorationType;
 let overviewDecoration: vscode.TextEditorDecorationType;
 let dedupedDecoration: vscode.TextEditorDecorationType;
+let synthRangeCommandDecoration: vscode.TextEditorDecorationType;
+let synthRangeSpanDecoration: vscode.TextEditorDecorationType;
 
 class StateItem extends vscode.TreeItem {
   constructor(
@@ -111,6 +113,29 @@ function createDecorations() {
     before: {
       contentText: "▎",
       color: "rgba(120, 160, 255, 0.95)",
+      margin: "0 0.35rem 0 0"
+    }
+  });
+
+  synthRangeCommandDecoration = vscode.window.createTextEditorDecorationType({
+    isWholeLine: false,
+    overviewRulerColor: "rgba(90, 170, 255, 0.95)",
+    overviewRulerLane: vscode.OverviewRulerLane.Left,
+    before: {
+      contentText: "▎",
+      color: "rgba(90, 170, 255, 0.95)",
+      margin: "0 0.35rem 0 0"
+    }
+  });
+
+  synthRangeSpanDecoration = vscode.window.createTextEditorDecorationType({
+    isWholeLine: true,
+    backgroundColor: "rgba(90, 170, 255, 0.06)",
+    overviewRulerColor: "rgba(90, 170, 255, 0.35)",
+    overviewRulerLane: vscode.OverviewRulerLane.Left,
+    before: {
+      contentText: "▏",
+      color: "rgba(90, 170, 255, 0.9)",
       margin: "0 0.35rem 0 0"
     }
   });
@@ -203,6 +228,47 @@ function noteNameToMidi(name: string): number | undefined {
   if (semitone === undefined) return undefined;
 
   return (octave + 1) * 12 + semitone;
+}
+
+function midiToNoteName(midi: number): string {
+  const pcs = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+  const pitchClass = pcs[((midi % 12) + 12) % 12];
+  const octave = Math.floor(midi / 12) - 1;
+  return `${pitchClass}${octave}`;
+}
+
+function describeMidiRelativeToMiddleC(midi: number): string {
+  const diff = midi - 60;
+  if (diff === 0) return "middle C";
+  if (diff > 0) return `${diff} semitone${diff === 1 ? "" : "s"} above middle C`;
+  const abs = Math.abs(diff);
+  return `${abs} semitone${abs === 1 ? "" : "s"} below middle C`;
+}
+
+function describeSynthRange(rawValue: string): string {
+  const range = parseSynthRange(rawValue);
+  if (!range) return rawValue;
+
+  const [low, high] = range;
+
+  if (low === 1 && high === 1) {
+    return "off";
+  }
+
+  const note = midiToNoteName(high);
+
+  // Use visible glyphs instead of spaces. VS Code decoration text does not
+  // preserve runs of normal spaces reliably, especially with proportional fonts.
+  // We anchor the scale at C4 and show the synth ceiling note somewhere to the left.
+  const middleC = 60;
+  const width = 16;
+  const distanceBelowC4 = Math.max(0, Math.min(width, middleC - high));
+  const positionFromLeft = width - distanceBelowC4;
+
+  const left = "─".repeat(positionFromLeft);
+  const right = "─".repeat(width - positionFromLeft);
+
+  return `bass → ${note}  ${left}●${right}|C4`;
 }
 
 function parseNoteLine(line: string): { noteName: string; midi: number } | undefined {
@@ -381,6 +447,41 @@ function rangesForLines(doc: vscode.TextDocument, lineNumbers: number[]): vscode
   });
 }
 
+function synthRangeSpanRanges(
+  doc: vscode.TextDocument,
+  analysis: ReturnType<typeof analyseDocument>
+): vscode.Range[] {
+  const ranges: vscode.Range[] = [];
+  let activeStart: number | undefined;
+
+  for (let i = 0; i < analysis.lines.length; i++) {
+    const state = analysis.lines[i].stateAfter;
+    const rawRange = state["synthrange"];
+
+    const range = rawRange ? parseSynthRange(rawRange) : undefined;
+    const isActive = !!range && !(range[0] === 1 && range[1] === 1);
+
+    if (isActive && activeStart === undefined) {
+      activeStart = i;
+    }
+
+    if (!isActive && activeStart !== undefined) {
+      const endLine = Math.max(activeStart, i - 1);
+      const endChar = doc.lineAt(endLine).text.length;
+      ranges.push(new vscode.Range(activeStart, 0, endLine, endChar));
+      activeStart = undefined;
+    }
+  }
+
+  if (activeStart !== undefined) {
+    const endLine = analysis.lines.length - 1;
+    const endChar = doc.lineAt(endLine).text.length;
+    ranges.push(new vscode.Range(activeStart, 0, endLine, endChar));
+  }
+
+  return ranges;
+}
+
 function buildSidebarItems(
   editor: vscode.TextEditor,
   analysis: ReturnType<typeof analyseDocument>
@@ -424,15 +525,37 @@ function refreshEditor(editor: vscode.TextEditor | undefined, provider: AscoStat
     .filter(x => x.dedupedBass)
     .map(x => x.lineNumber);
 
-  const stateChangeLines = analysis.stateChanges.map(x => x.line);
+  const nonSynthRangeStateChangeLines = analysis.stateChanges
+    .filter(x => x.keyword !== "synthrange")
+    .map(x => x.line);
+
+  const synthRangeChanges = analysis.stateChanges.filter(x => x.keyword === "synthrange");
   const noteLines = analysis.lines
     .filter(x => x.noteMidi !== undefined || x.chordMidis !== undefined)
     .map(x => x.lineNumber);
 
   editor.setDecorations(triggerDecoration, rangesForLines(editor.document, triggeredLines));
-  editor.setDecorations(stateLineDecoration, rangesForLines(editor.document, stateChangeLines));
-  editor.setDecorations(overviewDecoration, rangesForLines(editor.document, noteLines));
   editor.setDecorations(dedupedDecoration, rangesForLines(editor.document, dedupedLines));
+  editor.setDecorations(stateLineDecoration, rangesForLines(editor.document, nonSynthRangeStateChangeLines));
+  editor.setDecorations(overviewDecoration, rangesForLines(editor.document, noteLines));
+  editor.setDecorations(synthRangeSpanDecoration, synthRangeSpanRanges(editor.document, analysis));
+
+  editor.setDecorations(
+    synthRangeCommandDecoration,
+    synthRangeChanges.map(change => {
+      const line = editor.document.lineAt(change.line);
+      return {
+        range: new vscode.Range(change.line, 0, change.line, line.text.length),
+        renderOptions: {
+          after: {
+            contentText: `  ${describeSynthRange(change.value)}`,
+            color: new vscode.ThemeColor("descriptionForeground"),
+            margin: "0 0 0 1rem"
+          }
+        }
+      };
+    })
+  );
 
   provider.refresh(buildSidebarItems(editor, analysis));
 }
