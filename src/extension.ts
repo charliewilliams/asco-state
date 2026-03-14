@@ -32,6 +32,9 @@ let overviewDecoration: vscode.TextEditorDecorationType;
 let dedupedDecoration: vscode.TextEditorDecorationType;
 let synthRangeCommandDecoration: vscode.TextEditorDecorationType;
 let synthRangeSpanDecoration: vscode.TextEditorDecorationType;
+let splitBelowDecoration: vscode.TextEditorDecorationType;
+let splitAboveDecoration: vscode.TextEditorDecorationType;
+let synthOffsetCommandDecoration: vscode.TextEditorDecorationType;
 
 class StateItem extends vscode.TreeItem {
   constructor(
@@ -136,6 +139,29 @@ function createDecorations() {
     before: {
       contentText: "▏",
       color: "rgba(90, 170, 255, 0.9)",
+      margin: "0 0.35rem 0 0"
+    }
+  });
+
+  splitBelowDecoration = vscode.window.createTextEditorDecorationType({
+    color: "rgba(214, 143, 51, 0.95)",
+    overviewRulerColor: "rgba(214, 143, 51, 0.75)",
+    overviewRulerLane: vscode.OverviewRulerLane.Left
+  });
+
+  splitAboveDecoration = vscode.window.createTextEditorDecorationType({
+    color: "rgba(108, 147, 255, 0.95)",
+    overviewRulerColor: "rgba(108, 147, 255, 0.75)",
+    overviewRulerLane: vscode.OverviewRulerLane.Left
+  });
+
+  synthOffsetCommandDecoration = vscode.window.createTextEditorDecorationType({
+    isWholeLine: false,
+    overviewRulerColor: "rgba(196, 140, 255, 0.9)",
+    overviewRulerLane: vscode.OverviewRulerLane.Left,
+    before: {
+      contentText: "▎",
+      color: "rgba(196, 140, 255, 0.95)",
       margin: "0 0.35rem 0 0"
     }
   });
@@ -270,6 +296,35 @@ function describeSynthRange(rawValue: string): string {
   return `bass → ${note}  ${left}●${right}|C4`;
 }
 
+function parseSplitValue(rawValue: string | undefined): number | undefined {
+  if (!rawValue) return undefined;
+  const value = Number(rawValue.trim().split(/\s+/)[0]);
+  return Number.isNaN(value) ? undefined : value;
+}
+
+function freshMidisForLine(line: LineAnalysis): number[] {
+  const values: number[] = [];
+  if (line.noteMidi !== undefined) values.push(line.noteMidi);
+  if (line.chordMidis && line.chordMidis.length > 0) values.push(...line.chordMidis);
+  return values;
+}
+
+function describeSynthOffset(rawValue: string): string {
+  const value = Number(rawValue.trim().split(/\s+/)[0]);
+  if (Number.isNaN(value)) return rawValue;
+  if (value === 0) return "offset 0";
+
+  const direction = value > 0 ? "↑" : "↓";
+  const abs = Math.abs(value);
+  const octaves = abs / 12;
+
+  if (Number.isInteger(octaves)) {
+    return `offset ${direction}${abs} st (${octaves} oct)`;
+  }
+
+  return `offset ${direction}${abs} st`;
+}
+
 function parseNoteLine(line: string): { noteName: string; midi: number } | undefined {
   const trimmed = stripComment(line).trim();
   const m = /^NOTE\s+(-?[A-Ga-g][#b]?-?\d+)\b/.exec(trimmed);
@@ -285,8 +340,12 @@ function parseNoteLine(line: string): { noteName: string; midi: number } | undef
 }
 
 function parseChordLine(line: string): { noteNames: string[]; midis: number[] } | undefined {
+  return parseChordLikeLine(line, "CHORD");
+}
+
+function parseChordLikeLine(line: string, keyword: "CHORD" | "TRILL"): { noteNames: string[]; midis: number[] } | undefined {
   const trimmed = stripComment(line).trim();
-  const m = /^CHORD\s*\(([^)]*)\)/.exec(trimmed);
+  const m = new RegExp(`^${keyword}\\s*\\(([^)]*)\\)`).exec(trimmed);
   if (!m) return undefined;
 
   const rawNotes = m[1]
@@ -295,7 +354,7 @@ function parseChordLine(line: string): { noteNames: string[]; midis: number[] } 
     .map(x => x.trim())
     .filter(Boolean)
     .filter(x => x !== "0")
-    .filter(x => !x.startsWith("-")); // ignore held/tied notes completely
+    .filter(x => !x.startsWith("-"));
 
   if (rawNotes.length === 0) return undefined;
 
@@ -314,6 +373,7 @@ function parseChordLine(line: string): { noteNames: string[]; midis: number[] } 
 
   return { noteNames, midis };
 }
+
 
 function bassCandidateFromRange(
   state: ScoreState,
@@ -376,7 +436,7 @@ function analyseDocument(doc: vscode.TextDocument): {
       noteName = note.noteName;
     }
 
-    const chord = parseChordLine(text);
+    const chord = parseChordLine(text) ?? parseChordLikeLine(text, "TRILL");
     if (chord) {
       chordMidis = chord.midis;
       chordNotes = chord.noteNames;
@@ -451,31 +511,17 @@ function synthRangeSpanRanges(
   analysis: ReturnType<typeof analyseDocument>
 ): vscode.Range[] {
   const ranges: vscode.Range[] = [];
-  let activeStart: number | undefined;
 
   for (let i = 0; i < analysis.lines.length; i++) {
     const state = analysis.lines[i].stateAfter;
     const rawRange = state["synthrange"];
-
     const range = rawRange ? parseSynthRange(rawRange) : undefined;
     const isActive = !!range && !(range[0] === 1 && range[1] === 1);
 
-    if (isActive && activeStart === undefined) {
-      activeStart = i;
-    }
+    if (!isActive) continue;
 
-    if (!isActive && activeStart !== undefined) {
-      const endLine = Math.max(activeStart, i - 1);
-      const endChar = doc.lineAt(endLine).text.length;
-      ranges.push(new vscode.Range(activeStart, 0, endLine, endChar));
-      activeStart = undefined;
-    }
-  }
-
-  if (activeStart !== undefined) {
-    const endLine = analysis.lines.length - 1;
-    const endChar = doc.lineAt(endLine).text.length;
-    ranges.push(new vscode.Range(activeStart, 0, endLine, endChar));
+    const endChar = doc.lineAt(i).text.length;
+    ranges.push(new vscode.Range(i, 0, i, endChar));
   }
 
   return ranges;
@@ -516,6 +562,26 @@ function refreshEditor(editor: vscode.TextEditor | undefined, provider: AscoStat
 
   const analysis = analyseDocument(editor.document);
 
+  const splitBelowLines: number[] = [];
+  const splitAboveLines: number[] = [];
+
+  for (const line of analysis.lines) {
+    const splitValue = parseSplitValue(line.stateAfter["split"]);
+    if (splitValue === undefined) continue;
+
+    const midis = freshMidisForLine(line);
+    if (midis.length === 0) continue;
+
+    const hasBelow = midis.some(midi => midi < splitValue);
+    const hasAboveOrEqual = midis.some(midi => midi >= splitValue);
+
+    if (hasBelow && !hasAboveOrEqual) {
+      splitBelowLines.push(line.lineNumber);
+    } else if (hasAboveOrEqual && !hasBelow) {
+      splitAboveLines.push(line.lineNumber);
+    }
+  }
+
   const triggeredLines = analysis.lines
     .filter(x => x.newlyTriggeredBass)
     .map(x => x.lineNumber);
@@ -524,18 +590,21 @@ function refreshEditor(editor: vscode.TextEditor | undefined, provider: AscoStat
     .filter(x => x.dedupedBass)
     .map(x => x.lineNumber);
 
-  const nonSynthRangeStateChangeLines = analysis.stateChanges
-    .filter(x => x.keyword !== "synthrange")
+  const nonDecoratedStateChangeLines = analysis.stateChanges
+    .filter(x => x.keyword !== "synthrange" && x.keyword !== "synthoffset")
     .map(x => x.line);
 
   const synthRangeChanges = analysis.stateChanges.filter(x => x.keyword === "synthrange");
+  const synthOffsetChanges = analysis.stateChanges.filter(x => x.keyword === "synthoffset");
   const noteLines = analysis.lines
     .filter(x => x.noteMidi !== undefined || x.chordMidis !== undefined)
     .map(x => x.lineNumber);
 
+  editor.setDecorations(splitBelowDecoration, rangesForLines(editor.document, splitBelowLines));
+  editor.setDecorations(splitAboveDecoration, rangesForLines(editor.document, splitAboveLines));
   editor.setDecorations(triggerDecoration, rangesForLines(editor.document, triggeredLines));
   editor.setDecorations(dedupedDecoration, rangesForLines(editor.document, dedupedLines));
-  editor.setDecorations(stateLineDecoration, rangesForLines(editor.document, nonSynthRangeStateChangeLines));
+  editor.setDecorations(stateLineDecoration, rangesForLines(editor.document, nonDecoratedStateChangeLines));
   editor.setDecorations(overviewDecoration, rangesForLines(editor.document, noteLines));
   editor.setDecorations(synthRangeSpanDecoration, synthRangeSpanRanges(editor.document, analysis));
 
@@ -548,6 +617,23 @@ function refreshEditor(editor: vscode.TextEditor | undefined, provider: AscoStat
         renderOptions: {
           after: {
             contentText: `  ${describeSynthRange(change.value)}`,
+            color: new vscode.ThemeColor("descriptionForeground"),
+            margin: "0 0 0 1rem"
+          }
+        }
+      };
+    })
+  );
+
+  editor.setDecorations(
+    synthOffsetCommandDecoration,
+    synthOffsetChanges.map(change => {
+      const line = editor.document.lineAt(change.line);
+      return {
+        range: new vscode.Range(change.line, 0, change.line, line.text.length),
+        renderOptions: {
+          after: {
+            contentText: `  ${describeSynthOffset(change.value)}`,
             color: new vscode.ThemeColor("descriptionForeground"),
             margin: "0 0 0 1rem"
           }
